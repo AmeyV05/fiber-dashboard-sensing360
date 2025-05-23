@@ -16,14 +16,29 @@ st.set_page_config(layout="wide", page_title="Dual Bearing FFT Visualization")
 @st.cache_data(ttl=24*3600, max_entries=1)
 def load_processed_data():
     """Load the processed dual bearing data from HDF5 file"""
-    data_file = 'processed_dual_bearing_data.h5'
     
-    if not os.path.exists(data_file):
-        st.error(f"Processed data file '{data_file}' not found! Please run the preprocessing script first.")
+    # Try to load full processed data first, then sample data as fallback
+    data_files = [
+        'processed_dual_bearing_data.h5',
+        'sample_dual_bearing_data.h5'
+    ]
+    
+    data_file = None
+    for file in data_files:
+        if os.path.exists(file):
+            data_file = file
+            break
+    
+    if data_file is None:
+        st.error("No data file found! Please run the preprocessing script first or ensure data file is available.")
         st.info("For Streamlit Cloud deployment, ensure the data file is available or use the file upload feature.")
         st.stop()
     
-    with st.spinner("Loading processed dual bearing data..."):
+    # Show which file is being loaded
+    if data_file == 'sample_dual_bearing_data.h5':
+        st.info("📊 **Sample Mode**: Using sample data file for demonstration. Upload full data file for complete analysis.")
+    
+    with st.spinner(f"Loading data from {data_file}..."):
         try:
             with h5py.File(data_file, 'r') as h5f:
                 # Load time and frequency data
