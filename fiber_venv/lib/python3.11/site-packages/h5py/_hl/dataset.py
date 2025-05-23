@@ -13,6 +13,7 @@
 
 import posixpath as pp
 import sys
+from abc import ABC, abstractmethod
 
 import numpy
 
@@ -38,7 +39,8 @@ def make_new_dset(parent, shape=None, dtype=None, data=None, name=None,
                   fillvalue=None, scaleoffset=None, track_times=False,
                   external=None, track_order=None, dcpl=None, dapl=None,
                   efile_prefix=None, virtual_prefix=None, allow_unknown_filter=False,
-                  rdcc_nslots=None, rdcc_nbytes=None, rdcc_w0=None):
+                  rdcc_nslots=None, rdcc_nbytes=None, rdcc_w0=None, *,
+                  fill_time=None):
     """ Return a new low-level dataset identifier """
 
     # Convert data to a C-contiguous ndarray
@@ -104,7 +106,17 @@ def make_new_dset(parent, shape=None, dtype=None, data=None, name=None,
     dcpl = filters.fill_dcpl(
         dcpl or h5p.create(h5p.DATASET_CREATE), shape, dtype,
         chunks, compression, compression_opts, shuffle, fletcher32,
-        maxshape, scaleoffset, external, allow_unknown_filter)
+        maxshape, scaleoffset, external, allow_unknown_filter,
+        fill_time=fill_time)
+
+    # Check that compression roundtrips correctly if it was specified
+    if compression is not None:
+        if isinstance(compression, filters.FilterRefBase):
+            compression = compression.filter_id
+        if isinstance(compression, int):
+            compression = filters.get_filter_name(compression)
+        if compression not in filters.get_filters(dcpl):
+            raise ValueError(f'compression {compression!r} not in filters {filters.get_filters(dcpl)!r}')
 
     if fillvalue is not None:
         # prepare string-type dtypes for fillvalue
@@ -196,41 +208,78 @@ def open_dset(parent, name, dapl=None, efile_prefix=None, virtual_prefix=None,
     return dset_id
 
 
-class AstypeWrapper:
+
+class AbstractView(ABC):
+    _dset: "Dataset"
+
+    def __init__(self, dset):
+        self._dset = dset
+
+    def __len__(self):
+        return len(self._dset)
+
+    @property
+    @abstractmethod
+    def dtype(self):
+        ...  # pragma: nocover
+
+    @property
+    def ndim(self):
+        return self._dset.ndim
+
+    @property
+    def shape(self):
+        return self._dset.shape
+
+    @property
+    def size(self):
+        return self._dset.size
+
+    @abstractmethod
+    def __getitem__(self, idx):
+        ...  # pragma: nocover
+
+    def __array__(self, dtype=None, copy=None):
+        if copy is False:
+            raise ValueError(
+                f"{self.__class__.__name__}.__array__ received {copy=} "
+                "but memory allocation cannot be avoided on read"
+            )
+
+        # If self.ndim == 0, convert np.generic back to np.ndarray
+        return numpy.asarray(self[()], dtype=dtype or self.dtype)
+
+class AsTypeView(AbstractView):
     """Wrapper to convert data on reading from a dataset.
     """
     def __init__(self, dset, dtype):
-        self._dset = dset
+        super().__init__(dset)
         self._dtype = numpy.dtype(dtype)
 
-    def __getitem__(self, args):
-        return self._dset.__getitem__(args, new_dtype=self._dtype)
+    @property
+    def dtype(self):
+        return self._dtype
 
-    def __len__(self):
-        """ Get the length of the underlying dataset
+    def __getitem__(self, idx):
+        return self._dset.__getitem__(idx, new_dtype=self._dtype)
 
-        >>> length = len(dataset.astype('f8'))
-        """
-        return len(self._dset)
-
-    def __array__(self, dtype=None):
-        data = self[:]
-        if dtype is not None:
-            data = data.astype(dtype)
-        return data
+    def __array__(self, dtype=None, copy=None):
+        return self._dset.__array__(dtype or self._dtype, copy)
 
 
-class AsStrWrapper:
+class AsStrView(AbstractView):
     """Wrapper to decode strings on reading the dataset"""
     def __init__(self, dset, encoding, errors='strict'):
-        self._dset = dset
-        if encoding is None:
-            encoding = h5t.check_string_dtype(dset.dtype).encoding
+        super().__init__(dset)
         self.encoding = encoding
         self.errors = errors
 
-    def __getitem__(self, args):
-        bytes_arr = self._dset[args]
+    @property
+    def dtype(self):
+        return numpy.dtype(object)
+
+    def __getitem__(self, idx):
+        bytes_arr = self._dset[idx]
         # numpy.char.decode() seems like the obvious thing to use. But it only
         # accepts numpy string arrays, not object arrays of bytes (which we
         # return from HDF5 variable-length strings). And the numpy
@@ -244,48 +293,31 @@ class AsStrWrapper:
             b.decode(self.encoding, self.errors) for b in bytes_arr.flat
         ], dtype=object).reshape(bytes_arr.shape)
 
-    def __len__(self):
-        """ Get the length of the underlying dataset
 
-        >>> length = len(dataset.asstr())
-        """
-        return len(self._dset)
-
-    def __array__(self):
-        return numpy.array([
-            b.decode(self.encoding, self.errors) for b in self._dset
-        ], dtype=object).reshape(self._dset.shape)
-
-
-class FieldsWrapper:
+class FieldsView(AbstractView):
     """Wrapper to extract named fields from a dataset with a struct dtype"""
-    extract_field = None
 
     def __init__(self, dset, prior_dtype, names):
-        self._dset = dset
+        super().__init__(dset)
         if isinstance(names, str):
             self.extract_field = names
             names = [names]
+        else:
+            self.extract_field = None
         self.read_dtype = readtime_dtype(prior_dtype, names)
 
-    def __array__(self, dtype=None):
-        data = self[:]
-        if dtype is not None:
-            data = data.astype(dtype)
-        return data
+    @property
+    def dtype(self):
+        t = self.read_dtype
+        if self.extract_field is not None:
+            t = t[self.extract_field]
+        return t
 
-    def __getitem__(self, args):
-        data = self._dset.__getitem__(args, new_dtype=self.read_dtype)
+    def __getitem__(self, idx):
+        data = self._dset.__getitem__(idx, new_dtype=self.read_dtype)
         if self.extract_field is not None:
             data = data[self.extract_field]
         return data
-
-    def __len__(self):
-        """ Get the length of the underlying dataset
-
-        >>> length = len(dataset.fields(['x', 'y']))
-        """
-        return len(self._dset)
 
 
 def readtime_dtype(basetype, names):
@@ -334,10 +366,10 @@ class ChunkIterator:
         self._layout = dset.chunks
         if source_sel is None:
             # select over entire dataset
-            slices = []
-            for dim in range(rank):
-                slices.append(slice(0, self._shape[dim]))
-            self._sel = tuple(slices)
+            self._sel = tuple(
+                slice(0, self._shape[dim])
+                for dim in range(rank)
+            )
         else:
             if isinstance(source_sel, slice):
                 self._sel = (source_sel,)
@@ -388,7 +420,7 @@ class ChunkIterator:
 
             if dim > 0:
                 # reset to the start and continue iterating with higher dimension
-                self._chunk_index[dim] = 0
+                self._chunk_index[dim] = s.start // self._layout[dim]
             dim -= 1
         return tuple(slices)
 
@@ -405,7 +437,7 @@ class Dataset(HLObject):
 
         >>> double_precision = dataset.astype('f8')[0:100:2]
         """
-        return AstypeWrapper(self, dtype)
+        return AsTypeView(self, dtype)
 
     def asstr(self, encoding=None, errors='strict'):
         """Get a wrapper to read string data as Python strings:
@@ -424,7 +456,7 @@ class Dataset(HLObject):
             )
         if encoding is None:
             encoding = string_info.encoding
-        return AsStrWrapper(self, encoding, errors=errors)
+        return AsStrView(self, encoding, errors=errors)
 
     def fields(self, names, *, _prior_dtype=None):
         """Get a wrapper to read a subset of fields from a compound data type:
@@ -437,7 +469,7 @@ class Dataset(HLObject):
         """
         if _prior_dtype is None:
             _prior_dtype = self.dtype
-        return FieldsWrapper(self, _prior_dtype, names)
+        return FieldsView(self, _prior_dtype, names)
 
     if MPI:
         @property
@@ -633,6 +665,20 @@ class Dataset(HLObject):
         """Check if extent type is empty"""
         return self._extent_type == h5s.NULL
 
+    @cached_property
+    def _dcpl(self):
+        """
+        The dataset creation property list used when this dataset was created.
+        """
+        return self.id.get_create_plist()
+
+    @cached_property
+    def _filters(self):
+        """
+        The active filters of the dataset.
+        """
+        return filters.get_filters(self._dcpl)
+
     @with_phil
     def __init__(self, bind, *, readonly=False):
         """ Create a new Dataset object by binding to a low-level DatasetID.
@@ -641,9 +687,7 @@ class Dataset(HLObject):
             raise ValueError("%s is not a DatasetID" % bind)
         super().__init__(bind)
 
-        self._dcpl = self.id.get_create_plist()
         self._dxpl = h5p.create(h5p.DATASET_XFER)
-        self._filters = filters.get_filters(self._dcpl)
         self._readonly = readonly
         self._cache_props = {}
 
@@ -865,11 +909,11 @@ class Dataset(HLObject):
         if vlen is not None and vlen not in (bytes, str):
             try:
                 val = numpy.asarray(val, dtype=vlen)
-            except ValueError:
+            except (ValueError, TypeError):
                 try:
                     val = numpy.array([numpy.array(x, dtype=vlen)
                                        for x in val], dtype=self.dtype)
-                except ValueError:
+                except (ValueError, TypeError):
                     pass
             if vlen == val.dtype:
                 if val.ndim > 1:
@@ -1049,11 +1093,16 @@ class Dataset(HLObject):
                 self.id.write(mspace, fspace, source, dxpl=self._dxpl)
 
     @with_phil
-    def __array__(self, dtype=None):
+    def __array__(self, dtype=None, copy=None):
         """ Create a Numpy array containing the whole dataset.  DON'T THINK
         THIS MEANS DATASETS ARE INTERCHANGEABLE WITH ARRAYS.  For one thing,
         you have to read the whole dataset every time this method is called.
         """
+        if copy is False:
+            raise ValueError(
+                f"Dataset.__array__ received {copy=} "
+                "but memory allocation cannot be avoided on read"
+            )
         arr = numpy.zeros(self.shape, dtype=self.dtype if dtype is None else dtype)
 
         # Special case for (0,)*-shape datasets
