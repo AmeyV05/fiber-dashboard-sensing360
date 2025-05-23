@@ -14,38 +14,128 @@ import datetime
 # Configure Streamlit
 st.set_page_config(layout="wide", page_title="Dual Bearing FFT Visualization")
 
+# --- GENERATE SAMPLE DATA FUNCTION ---
+def generate_sample_data_for_demo():
+    """Generate lightweight sample data for demo purposes"""
+    # Parameters
+    sampling_frequency = 2000  # Hz
+    duration = 5  # seconds (very small for demo)
+    shaft_speed_rpm = 450
+    fundamental_frequency = shaft_speed_rpm / 60  # 7.5 Hz
+    
+    # Time vector
+    num_samples = int(sampling_frequency * duration)
+    time_vector = np.linspace(0, duration, num_samples)
+    
+    # Frequency vector for FFT
+    freqs = np.fft.fftfreq(num_samples, 1/sampling_frequency)
+    freqs = freqs[:num_samples//2]  # Only positive frequencies
+    
+    # Bearing configurations
+    bearing_a_angles = np.array([67.0, 94.7, 122.4, 150.1, 177.8, 205.5, 233.2, 260.8, 288.5, 316.2, 343.9, 371.6, 399.3])
+    bearing_b_angles = np.array([282.0, 254.3, 226.6, 198.9, 171.2, 143.5, 115.8, 88.2, 60.5, 32.8, 5.1, -22.6, -50.3])
+    
+    # Generate synthetic FFT data
+    def generate_bearing_fft(angles, rolling_elements):
+        num_sensors = len(angles)
+        fft_mags = np.zeros((len(freqs), num_sensors))
+        fft_phases = np.zeros((len(freqs), num_sensors))
+        
+        for sensor_idx, angle in enumerate(angles):
+            # Create synthetic FFT peaks at key frequencies
+            for freq_mult in [1, 2, 3, 4, 5, 8]:
+                target_freq = fundamental_frequency * freq_mult
+                freq_idx = np.argmin(np.abs(freqs - target_freq))
+                
+                # Add magnitude and phase based on sensor position
+                amplitude = 1.0 / freq_mult * (0.5 + 0.5 * np.random.random())
+                phase = angle + np.random.normal(0, 10)  # Some phase variation
+                
+                # Add some width to the peak
+                for offset in range(-2, 3):
+                    if 0 <= freq_idx + offset < len(freqs):
+                        fft_mags[freq_idx + offset, sensor_idx] += amplitude * np.exp(-offset**2/2)
+                        fft_phases[freq_idx + offset, sensor_idx] = phase
+        
+        return fft_mags, fft_phases
+    
+    # Generate data for both bearings
+    bearing_a_fft_mags, bearing_a_fft_phases = generate_bearing_fft(bearing_a_angles, 19)
+    bearing_b_fft_mags, bearing_b_fft_phases = generate_bearing_fft(bearing_b_angles, 21)
+    
+    return {
+        'time_vector': time_vector,
+        'freqs': freqs,
+        'bearing_a': {
+            'fft_mags': bearing_a_fft_mags,
+            'fft_phases': bearing_a_fft_phases,
+            'angles': bearing_a_angles,
+            'rolling_elements': 19
+        },
+        'bearing_b': {
+            'fft_mags': bearing_b_fft_mags,
+            'fft_phases': bearing_b_fft_phases,
+            'angles': bearing_b_angles,
+            'rolling_elements': 21
+        },
+        'sampling_frequency': sampling_frequency,
+        'shaft_speed_rpm': shaft_speed_rpm,
+        'fundamental_frequency': fundamental_frequency
+    }
+
 # --- LOAD PROCESSED DATA ---
 @st.cache_data(ttl=24*3600, max_entries=1)
 def load_processed_data():
-    """Load the processed dual bearing data from HDF5 file"""
-    data_file = 'processed_dual_bearing_data.h5'
+    """Load the processed dual bearing data from HDF5 file or generate sample data"""
     
-    if not os.path.exists(data_file):
-        st.error(f"Processed data file '{data_file}' not found! Please run the preprocessing script first.")
-        st.stop()
+    # Try different data file options
+    data_files = [
+        'processed_dual_bearing_data.h5',
+        'sample_dual_bearing_data.h5'
+    ]
     
-    with st.spinner("Loading processed dual bearing data..."):
-        with h5py.File(data_file, 'r') as h5f:
-            # Load time and frequency data
-            time_vector = h5f['time_vector'][:]
-            freqs = h5f['freqs'][:]
+    data_file = None
+    for file in data_files:
+        if os.path.exists(file):
+            data_file = file
+            break
+    
+    if data_file is None:
+        # No data file found, use sample data for demo
+        st.info("📊 **Demo Mode**: Using synthetic sample data for demonstration. Upload your own data file for full functionality.")
+        return generate_sample_data_for_demo()
+    
+    # Load data from file
+    with st.spinner(f"Loading data from {data_file}..."):
+        try:
+            with h5py.File(data_file, 'r') as h5f:
+                # Load time and frequency data
+                time_vector = h5f['time_vector'][:]
+                freqs = h5f['freqs'][:]
+                
+                # Load bearing A data
+                bearing_a_fft_mags = h5f['bearing_a']['fft_mags'][:]
+                bearing_a_fft_phases = h5f['bearing_a']['fft_phases'][:]
+                bearing_a_angles = h5f['bearing_a']['sensor_angles'][:]
+                bearing_a_rolling_elements = h5f['bearing_a'].attrs['rolling_elements']
+                
+                # Load bearing B data
+                bearing_b_fft_mags = h5f['bearing_b']['fft_mags'][:]
+                bearing_b_fft_phases = h5f['bearing_b']['fft_phases'][:]
+                bearing_b_angles = h5f['bearing_b']['sensor_angles'][:]
+                bearing_b_rolling_elements = h5f['bearing_b'].attrs['rolling_elements']
+                
+                # Load metadata
+                sampling_frequency = h5f.attrs['sampling_frequency']
+                shaft_speed_rpm = h5f.attrs['shaft_speed_rpm']
+                fundamental_frequency = h5f.attrs['fundamental_frequency_hz']
+                
+            st.success(f"✅ Loaded data from {data_file}")
             
-            # Load bearing A data
-            bearing_a_fft_mags = h5f['bearing_a']['fft_mags'][:]
-            bearing_a_fft_phases = h5f['bearing_a']['fft_phases'][:]
-            bearing_a_angles = h5f['bearing_a']['sensor_angles'][:]
-            bearing_a_rolling_elements = h5f['bearing_a'].attrs['rolling_elements']
-            
-            # Load bearing B data
-            bearing_b_fft_mags = h5f['bearing_b']['fft_mags'][:]
-            bearing_b_fft_phases = h5f['bearing_b']['fft_phases'][:]
-            bearing_b_angles = h5f['bearing_b']['sensor_angles'][:]
-            bearing_b_rolling_elements = h5f['bearing_b'].attrs['rolling_elements']
-            
-            # Load metadata
-            sampling_frequency = h5f.attrs['sampling_frequency']
-            shaft_speed_rpm = h5f.attrs['shaft_speed_rpm']
-            fundamental_frequency = h5f.attrs['fundamental_frequency_hz']
+        except Exception as e:
+            st.error(f"Error loading data file {data_file}: {e}")
+            st.info("Using sample data instead...")
+            return generate_sample_data_for_demo()
     
     return {
         'time_vector': time_vector,
@@ -88,6 +178,17 @@ st.markdown(f"**Shaft Speed:** {data['shaft_speed_rpm']} RPM | **Fundamental Fre
 
 # --- SIDEBAR CONTROLS ---
 st.sidebar.header("🎛️ Visualization Controls")
+
+# File upload option
+st.sidebar.header("📁 Data Upload")
+uploaded_file = st.sidebar.file_uploader(
+    "Upload HDF5 data file",
+    type=['h5'],
+    help="Upload a processed dual bearing data file in HDF5 format"
+)
+
+if uploaded_file is not None:
+    st.sidebar.success("File uploaded! Please refresh to use the new data.")
 
 # Frequency selection - using bearing-specific frequencies
 bearing_freqs_to_plot = [

@@ -69,6 +69,8 @@ The dashboard will open automatically in your browser at `http://localhost:8501`
 For deployment on Streamlit Cloud:
 
 1. **Push to GitHub**: Ensure all files are committed and pushed to your GitHub repository
+   
+   **Important**: Large data files (*.mat, *.h5) are excluded from git to avoid memory issues on Streamlit Cloud.
 
 2. **Access Streamlit Cloud**: Go to [share.streamlit.io](https://share.streamlit.io)
 
@@ -83,9 +85,22 @@ For deployment on Streamlit Cloud:
    - `packages.txt` - System dependencies 
    - `.streamlit/config.toml` - Streamlit configuration
 
-5. **Data File**: Ensure `processed_dual_bearing_data.h5` is included in your repository (or run preprocessing on the cloud)
+5. **Data Handling**: The app automatically handles missing data:
+   - **Demo Mode**: Uses lightweight synthetic data when no data file is present
+   - **File Upload**: Users can upload their own HDF5 data files via the sidebar
+   - **Sample Data**: Run `python generate_sample_data.py` locally to create a small sample file
+
+6. **Memory Optimization**: 
+   - Large data files are excluded from git to prevent memory errors
+   - App generates synthetic demo data if no data file is available
+   - Streamlit Cloud memory limits are respected
 
 **Important**: Do not use `run_dashboard.py` as the main file for Streamlit Cloud deployment, as it's designed for local development only.
+
+**For Full Dataset**: If you need to use the full dataset on Streamlit Cloud, consider:
+- Using Streamlit's file upload feature
+- Storing data in external services (AWS S3, Google Cloud Storage)
+- Using data streaming approaches
 
 ## 📊 Dashboard Features
 

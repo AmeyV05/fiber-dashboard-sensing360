@@ -51,6 +51,11 @@ Thumbs.db
 # Jupyter Notebooks
 .ipynb_checkpoints
 
-# Note: Keep these files for Streamlit Cloud deployment
-# processed_dual_bearing_data.h5 - needed for the app
-# optics11_recording_*.mat - raw data file
+# Large Data Files - Exclude from git to avoid memory issues on Streamlit Cloud
+*.mat
+*.h5
+processed_dual_bearing_data.h5
+optics11_recording_*.mat
+
+# Generated outputs
+validation_plots/
