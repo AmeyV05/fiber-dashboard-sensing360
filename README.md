@@ -53,15 +53,39 @@ This script:
 
 ### 3. Launch Dashboard
 
+#### Local Development
 ```bash
 # Method 1: Direct launch
 streamlit run dual_bearing_dashboard.py
 
-# Method 2: Using helper script
-python run_dashboard.py
+# Method 2: Using local helper script
+python start_local.py
 ```
 
 The dashboard will open automatically in your browser at `http://localhost:8501`
+
+#### Streamlit Cloud Deployment
+
+For deployment on Streamlit Cloud:
+
+1. **Push to GitHub**: Ensure all files are committed and pushed to your GitHub repository
+
+2. **Access Streamlit Cloud**: Go to [share.streamlit.io](https://share.streamlit.io)
+
+3. **Deploy App**: 
+   - Connect your GitHub account
+   - Select your repository: `fiber-dashboard-sensing360`
+   - Set main file path: `dual_bearing_dashboard.py`
+   - Set branch: `main`
+
+4. **Configuration Files**: The following files are included for Streamlit Cloud:
+   - `requirements.txt` - Python dependencies
+   - `packages.txt` - System dependencies 
+   - `.streamlit/config.toml` - Streamlit configuration
+
+5. **Data File**: Ensure `processed_dual_bearing_data.h5` is included in your repository (or run preprocessing on the cloud)
+
+**Important**: Do not use `run_dashboard.py` as the main file for Streamlit Cloud deployment, as it's designed for local development only.
 
 ## 📊 Dashboard Features
 
