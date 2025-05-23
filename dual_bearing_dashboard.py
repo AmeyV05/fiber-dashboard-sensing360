@@ -274,6 +274,41 @@ def create_memory_optimized_bearing_plot(bearing_data, bearing_name, freq_select
             )
         )
         
+        # Add smooth interpolated curve (restored from original)
+        if len(sensor_angles) >= 4:  # Need at least 4 points for interpolation
+            try:
+                # Convert to cartesian for interpolation
+                x_points = np.array([r * np.cos(np.radians(theta)) for r, theta in zip(radii, sensor_angles)])
+                y_points = np.array([r * np.sin(np.radians(theta)) for r, theta in zip(radii, sensor_angles)])
+                
+                # Close the curve
+                x_closed = np.append(x_points, x_points[0])
+                y_closed = np.append(y_points, y_points[0])
+                
+                # Interpolate with reduced points for memory efficiency
+                tck, u = splprep([x_closed, y_closed], s=0, per=True, k=3)
+                u_new = np.linspace(0, 1, 100)  # Reduced from 200 to 100 for memory
+                x_smooth, y_smooth = splev(u_new, tck)
+                
+                # Convert back to polar
+                r_smooth = np.sqrt(x_smooth**2 + y_smooth**2)
+                theta_smooth = np.degrees(np.arctan2(y_smooth, x_smooth)) % 360
+                
+                frame_data.append(
+                    go.Scatterpolar(
+                        r=r_smooth,
+                        theta=theta_smooth,
+                        mode='lines',
+                        line=dict(color='rgba(255,0,0,0.7)', width=2),
+                        fill='toself',
+                        fillcolor='rgba(255,0,0,0.1)',
+                        showlegend=False,
+                        name='Interpolated Shape'
+                    )
+                )
+            except Exception:
+                pass  # Skip interpolation if it fails
+        
         # Create frame
         frames.append(go.Frame(data=frame_data, name=f"frame{frame_idx}"))
     
