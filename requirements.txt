@@ -1,4 +1,6 @@
 numpy>=1.26.0
+scipy>=1.11.3
+h5py>=3.10.0
 streamlit>=1.29.0
 plotly>=5.18.0
 pandas>=2.1.0 
