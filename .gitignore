@@ -59,7 +59,6 @@ optics11_recording_*.mat
 # Generated outputs
 validation_plots/
 
-# Keep smaller split bearing files and sample data for Streamlit Cloud deployment
+# Keep smaller split bearing files for Streamlit Cloud deployment
 !processed_bearing_a_data.h5  # ~13MB
 !processed_bearing_b_data.h5  # ~13MB
-!sample_dual_bearing_data.h5
