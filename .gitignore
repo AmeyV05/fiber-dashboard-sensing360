@@ -53,11 +53,13 @@ Thumbs.db
 
 # Large Data Files - Exclude from git to avoid memory issues on Streamlit Cloud
 *.mat
-processed_dual_bearing_data.h5
+processed_dual_bearing_data.h5  # Large original file (50MB)
 optics11_recording_*.mat
 
 # Generated outputs
 validation_plots/
 
-# Keep sample data for Streamlit Cloud deployment
+# Keep smaller split bearing files and sample data for Streamlit Cloud deployment
+!processed_bearing_a_data.h5  # ~13MB
+!processed_bearing_b_data.h5  # ~13MB
 !sample_dual_bearing_data.h5

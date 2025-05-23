@@ -15,58 +15,83 @@ st.set_page_config(layout="wide", page_title="Dual Bearing FFT Visualization")
 # --- LOAD PROCESSED DATA ---
 @st.cache_data(ttl=24*3600, max_entries=1)
 def load_processed_data():
-    """Load the processed dual bearing data from HDF5 file"""
+    """Load the processed dual bearing data from separate HDF5 files"""
     
-    # Try to load full processed data first, then sample data as fallback
-    data_files = [
-        'processed_dual_bearing_data.h5',
-        'sample_dual_bearing_data.h5'
-    ]
+    # Load separate bearing files (for Streamlit Cloud deployment)
+    bearing_a_file = 'processed_bearing_a_data.h5'
+    bearing_b_file = 'processed_bearing_b_data.h5'
     
-    data_file = None
-    for file in data_files:
-        if os.path.exists(file):
-            data_file = file
-            break
-    
-    if data_file is None:
-        st.error("No data file found! Please run the preprocessing script first or ensure data file is available.")
-        st.info("For Streamlit Cloud deployment, ensure the data file is available or use the file upload feature.")
-        st.stop()
-    
-    # Show which file is being loaded
-    if data_file == 'sample_dual_bearing_data.h5':
-        st.info("📊 **Sample Mode**: Using sample data file for demonstration. Upload full data file for complete analysis.")
-    
-    with st.spinner(f"Loading data from {data_file}..."):
-        try:
-            with h5py.File(data_file, 'r') as h5f:
-                # Load time and frequency data
-                time_vector = h5f['time_vector'][:]
-                freqs = h5f['freqs'][:]
+    # Check if both files exist
+    if not os.path.exists(bearing_a_file) or not os.path.exists(bearing_b_file):
+        # Fallback to sample data if main files not available
+        fallback_file = 'sample_dual_bearing_data.h5'
+        if not os.path.exists(fallback_file):
+            st.error("No data files found! Please ensure bearing data files are available for deployment.")
+            st.stop()
+        
+        st.info("📊 **Sample Mode**: Using sample data file. For full analysis, ensure bearing data files are available.")
+        
+        # Load from sample file (original format)
+        with st.spinner(f"Loading data from {fallback_file}..."):
+            try:
+                with h5py.File(fallback_file, 'r') as h5f:
+                    # Load time and frequency data
+                    time_vector = h5f['time_vector'][:]
+                    freqs = h5f['freqs'][:]
+                    
+                    # Load bearing A data
+                    bearing_a_fft_mags = h5f['bearing_a']['fft_mags'][:]
+                    bearing_a_fft_phases = h5f['bearing_a']['fft_phases'][:]
+                    bearing_a_angles = h5f['bearing_a']['sensor_angles'][:]
+                    bearing_a_rolling_elements = h5f['bearing_a'].attrs['rolling_elements']
+                    
+                    # Load bearing B data
+                    bearing_b_fft_mags = h5f['bearing_b']['fft_mags'][:]
+                    bearing_b_fft_phases = h5f['bearing_b']['fft_phases'][:]
+                    bearing_b_angles = h5f['bearing_b']['sensor_angles'][:]
+                    bearing_b_rolling_elements = h5f['bearing_b'].attrs['rolling_elements']
+                    
+                    # Load metadata
+                    sampling_frequency = h5f.attrs['sampling_frequency']
+                    shaft_speed_rpm = h5f.attrs['shaft_speed_rpm']
+                    fundamental_frequency = h5f.attrs['fundamental_frequency_hz']
+                    
+                st.success(f"✅ Loaded data from {fallback_file}")
                 
+            except Exception as e:
+                st.error(f"Error loading data file {fallback_file}: {e}")
+                st.stop()
+    
+    else:
+        # Load from separate bearing files
+        with st.spinner("Loading data from separate bearing files..."):
+            try:
                 # Load bearing A data
-                bearing_a_fft_mags = h5f['bearing_a']['fft_mags'][:]
-                bearing_a_fft_phases = h5f['bearing_a']['fft_phases'][:]
-                bearing_a_angles = h5f['bearing_a']['sensor_angles'][:]
-                bearing_a_rolling_elements = h5f['bearing_a'].attrs['rolling_elements']
+                with h5py.File(bearing_a_file, 'r') as h5f:
+                    time_vector = h5f['time_vector'][:]
+                    freqs = h5f['freqs'][:]
+                    bearing_a_fft_mags = h5f['bearing_data']['fft_mags'][:]
+                    bearing_a_fft_phases = h5f['bearing_data']['fft_phases'][:]
+                    bearing_a_angles = h5f['bearing_data']['sensor_angles'][:]
+                    bearing_a_rolling_elements = h5f['bearing_data'].attrs['rolling_elements']
+                    
+                    # Load metadata from bearing A file
+                    sampling_frequency = h5f.attrs['sampling_frequency']
+                    shaft_speed_rpm = h5f.attrs['shaft_speed_rpm']
+                    fundamental_frequency = h5f.attrs['fundamental_frequency_hz']
                 
                 # Load bearing B data
-                bearing_b_fft_mags = h5f['bearing_b']['fft_mags'][:]
-                bearing_b_fft_phases = h5f['bearing_b']['fft_phases'][:]
-                bearing_b_angles = h5f['bearing_b']['sensor_angles'][:]
-                bearing_b_rolling_elements = h5f['bearing_b'].attrs['rolling_elements']
+                with h5py.File(bearing_b_file, 'r') as h5f:
+                    bearing_b_fft_mags = h5f['bearing_data']['fft_mags'][:]
+                    bearing_b_fft_phases = h5f['bearing_data']['fft_phases'][:]
+                    bearing_b_angles = h5f['bearing_data']['sensor_angles'][:]
+                    bearing_b_rolling_elements = h5f['bearing_data'].attrs['rolling_elements']
                 
-                # Load metadata
-                sampling_frequency = h5f.attrs['sampling_frequency']
-                shaft_speed_rpm = h5f.attrs['shaft_speed_rpm']
-                fundamental_frequency = h5f.attrs['fundamental_frequency_hz']
+                st.success(f"✅ Loaded data from {bearing_a_file} and {bearing_b_file}")
                 
-            st.success(f"✅ Loaded data from {data_file}")
-            
-        except Exception as e:
-            st.error(f"Error loading data file {data_file}: {e}")
-            st.stop()
+            except Exception as e:
+                st.error(f"Error loading bearing data files: {e}")
+                st.stop()
     
     return {
         'time_vector': time_vector,
@@ -110,16 +135,16 @@ st.markdown(f"**Shaft Speed:** {data['shaft_speed_rpm']} RPM | **Fundamental Fre
 # --- SIDEBAR CONTROLS ---
 st.sidebar.header("🎛️ Visualization Controls")
 
-# File upload option
-st.sidebar.header("📁 Data Upload")
-uploaded_file = st.sidebar.file_uploader(
-    "Upload HDF5 data file",
-    type=['h5'],
-    help="Upload a processed dual bearing data file in HDF5 format"
-)
-
-if uploaded_file is not None:
-    st.sidebar.success("File uploaded! Please refresh to use the new data.")
+# File upload option - COMMENTED OUT FOR STREAMLIT CLOUD DEPLOYMENT
+# st.sidebar.header("📁 Data Upload")
+# uploaded_file = st.sidebar.file_uploader(
+#     "Upload HDF5 data file",
+#     type=['h5'],
+#     help="Upload a processed dual bearing data file in HDF5 format"
+# )
+# 
+# if uploaded_file is not None:
+#     st.sidebar.success("File uploaded! Please refresh to use the new data.")
 
 # Frequency selection - using bearing-specific frequencies
 bearing_freqs_to_plot = [
